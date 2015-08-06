@@ -1,0 +1,47 @@
+#tweet_cleanからの続き
+
+ # 単語感情極性対応表の取得
+pndic <- read.table("http://www.lr.pi.titech.ac.jp/‾takamura/pubs/pn_ja.dic",
+                    sep = ":",
+                    col.names = c("term", "kana", "pos", "value"),
+                    colClasses = c("character", "character", "factor", "numeric"),
+                    fileEncoding = "Shift_JIS")
+# 名詞＋品詞で複数の候補がある場合は平均値を採用
+# 「アイス」の読みとして「アイス」、「アイスホッケー」が割り当てられている例もある
+pndic2 <- aggregate(value ‾ term + pos, pndic, mean)
+
+# pndic に登録されている品詞のみ抽出
+pos <- unique(pndic2$pos)
+ #ここからネガポジ
+ tweetDF <- docDF(statusDF, column = "cleanText", type = 1, pos = pos)
+ # pndic に登録されている単語のみ抽出
+ tweetDF <- subset(tweetDF, TERM %in% pndic2$term)
+ # 単語極性スコアを付与
+ tweetDF <- merge(tweetDF, pndic2, by.x = c("TERM", "POS1"), by.y = c("term", "pos"))
+ # 単語の出現回数にスコアを掛けて総和を取る
+ score <- colSums(tweetDF[4:(ncol(tweetDF) - 1)] * tweetDF$value)
+ 
+ #一時間ごとの平均を中心にネガポジを分類する
+ 
+dt<-data.table(statusDF)
+avescore<-dt[,mean(score),by = list(hour,date)]
+vlookup <- merge(dt,avescore,by=c("hour","date"))
+vlookup$avescore<-vlookup$V1
+vlookup[,V1:=NULL]
+
+tweettype2 <- factor(ifelse(vlookup$score > vlookup$avescore, "positive",
+ifelse(vlookup$score == vlookup$avescore, "neutral", "negative")),
+levels = c("positive", "neutral", "negative"))
+vlookup$tweettype2 <- droplevels(tweettype2)
+
+negaposi2<-vlookup
+negaposi2<-data.frame(negaposi2)
+negaposi2<-negaposi2[,c(1,2,20,21,22)]
+negaposi2$date_hour<-paste(negaposi2$date,negaposi2$hour,":00:00")
+
+print(qplot(x = factor(1), geom = "bar", fill = negaposi2$tweettype2) + coord_polar(theta = "y"))
+crosstable<-count(negaposi2,date_hour,tweettype2)
+crosstable<-spread(crosstable,tweettype2,n)
+head(crosstable[is.na(crosstable)] <- 0)
+xts2<-xts(crosstable[,-1],as.POSIXlt(crosstable$date_hour))
+dygraph(xts2,main="抽出されたツイートの感情の推移(時間ごとの平均)",group="abeanpo") %>%  dyOptions(colors = c("blue","green","orange")) %>% dyRangeSelector(height=20) %>%  dyHighlight(highlightSeriesOpts = list(strokeWidth = 3))
