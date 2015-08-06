@@ -1,0 +1,57 @@
+#sentimentanalysisからの続き
+
+# TF-IDF っぽいスコアを計算する関数
+TFIDF <- function(corpus, progress=FALSE){ # lexicalize した corpus を使用
+        res <- matrix(0, nr=length(corpus$vocab), nc=4)
+        dimnames(res) <- list(corpus$vocab, c("documents", "count", "freq", "score"))
+        res[, "documents"] <- length(corpus$documents)
+        wordset <- mapply(function(x) x[1,], corpus$documents) # documents中の単語リスト
+        wordfreq <- table(unlist(wordset)) # すべての単語の、全documents中の出現頻度
+        for(v in seq(corpus$vocab)){ # vocab と i は 1 ずれているので注意
+                count_docs <- sum(sapply(lapply(wordset, "==", v-1), any)) # その単語が出現する文章の数
+                res[v, "freq"] <- count_docs
+                if(progress){ # Linux用。プログレスバーを付ける
+                        pb <- txtProgressBar(min=1, max=length(corpus$vocab), style=3)
+                        setTxtProgressBar(pb, v)
+                }
+        }
+        res[, "count"] <- wordfreq
+        res[, "score"] <- log(res[, "count"]) * log(res[, "documents"]/res[, "freq"])
+        return(res)}
+        
+#ここから実際のトピック分析処理。予め12時間ごとで全ツイートを分類しておく。今回は全17ファイルになった。
+sentence <- NULL
+word.part <- c("名詞","形容詞")
+rm.word <- c("!", "?", "(", ")","という","、","。","は","一","二","〇","0","1","2","の","ため","的","十","たち","3","4","5","6","7","8","9","六","化","０","１","２","３","４","５","６","７","８","９","こと","http://t.co","https://t.co")
+for(i in seq(17)){
+    tmp <- read.csv(paste("http://toudai-tennis.sakura.ne.jp/ut-tennis/wp-content/knitr/abetopic", i, ".csv", sep=""), header=FALSE, fileEncoding="cp932")
+    lyric0 <- paste(unlist(c(tmp)), sep="", collapse="")
+    rmc <- unlist(RMeCabC(lyric0, mypref=1))
+    rmc <- rmc[mapply(function(x) x %in% word.part, names(rmc))]
+    rmc <- rmc[mapply(function(x) !x %in% rm.word, rmc)]
+    sentence <- c(sentence, paste(rmc, sep="", collapse=" ")) }
+corpus <- lexicalize(sentence)
+
+#一度corpusを作成したのち、TFIDFスコアで整理を行う
+
+tf0<-data.frame(tf0)
+tf0 <- TFIDF(corpus,TRUE)
+word0 <- rownames(tf0)[tf0$score > 0]# 1つの文章にしか登場しない単語は除外する
+corpus <-list(documents=lexicalize(sentence, vocab=word0), vocab=word0)# corpus の作り直し
+
+#トピック数と出力数の設定
+k<-10
+N<-17
+
+result <- lda.collapsed.gibbs.sampler(corpus$documents,  k,corpus$vocab,100,  0.1, 0.1,compute.log.likelihood=TRUE)
+summary(result)
+
+top.words <- top.topic.words(result$topics, 10, by.score = TRUE)
+print(top.words)
+
+topic.proportions <- t(result$document_sums)/colSums(result$document_sums)
+topic.proportions <- topic.proportions[1:N, ]
+topic.proportions[is.na(topic.proportions)] <- 1/k
+colnames(topic.proportions) <- apply(top.words, 2, paste, collapse = " ")
+par(mar=c(5, 14, 2, 2))
+barplot(topic.proportions, beside = TRUE, horiz = TRUE, las = 1, xlab = "proportion")
