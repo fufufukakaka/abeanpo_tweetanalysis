@@ -1,0 +1,75 @@
+require(dplyr)
+require(tidyr)
+require(data.table)
+require(dygraphs)
+require(lubridate)
+require(xts)
+require(zoo)
+require(reshape2)
+require(ggplot2)
+require(lda)
+require(RMeCab)
+require(twitteR)
+
+#予め取得した全ツイートを一つのcsvファイルにutf-8で保存しています。
+
+extractScreenNames <- function(text, strict = TRUE) {
+if (strict) {
+# Twitter で screen_name と見なされるものを抽出できるはず
+regex <- "(?:(?<!\\w)([@＠])((?>\\w+))(?![@＠])|[\\s\\S])"
+} else {
+# 例えば hoge@example.com などメールアドレスにもマッチする
+regex <- "(?:([@＠])(\\w+)|[\\s\\S])"
+}
+screenNames <- gsub(regex, "\\1\\2", text, perl = TRUE)
+unique(unlist(strsplit(substring(screenNames, 2), "[@＠]")))
+}
+
+
+removeURL <- function(text, strict = TRUE) {
+if (strict) {
+# 手前に英数字とかがなくて、間にbasic認証があるかもしれなくて（ちなみにTwitterだとURLとみなされない）
+# 有効なドメイン名で・・・という文字列を取り除く
+regex <- "(?<![-.\\w#@=!'\"/])https?://(?:[^:]+:.+@)?(?:[0-9A-Za-z][-0-9A-Za-z]*(?<!-)\\.)+[A-za-z]+(?:/[-\\w#%=+,.?!&~]*)*"
+} else {
+regex <- "https?://[-\\w#%=+,.?!&~/]+"
+}
+gsub(regex, "", text, perl = TRUE)
+}
+
+
+removeScreenName <- function(text, strict = TRUE) {
+if (strict) {
+# Twitter で screen_name と見なされるものを抽出できるはず
+regex <- "(?<!\\w)[@＠](?>\\w+)(?![@＠])"
+} else {
+# 例えば hoge@example.com などメールアドレスにもマッチする
+regex <- "[@＠]\\w+"
+}
+gsub(regex, "", text, perl = TRUE)
+}
+
+
+removeHashTag <- function(text, strict = TRUE) {
+delimiters <- "\\s,.\u3000-\u3002\uFF01\uFF1F"
+# cf. http://nobu666.com/2011/07/13/914.html
+validJa <- "\u3041-\u3094\u3099-\u309C\u30A1-\u30FA\u30FC\u3400-\uD7A3\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\uFF66-\uFF9E"
+if (strict) {
+regex <- sprintf("(^|[%s])(?:([#＃](?>[0-9]+)(?!\\w))|[#＃][\\w%s]+)", delimiters, validJa, validJa)
+} else {
+regex <- sprintf("[#＃][^%s]+", delimiters)
+}
+gsub(regex, "\\1\\2", text, perl = TRUE)
+}
+
+removeSpecialStr <- function(text) {
+removeURL(removeHashTag(removeScreenName(text)))
+}
+ 
+#ここからツイートの処理。予めディレクトリに移動する
+statusDF<-read.csv("alltweet.csv",fileEncoding="utf-8",header=FALSE)
+statusDF <- within(statusDF, {
+# ユーザ名, URL, ハッシュタグを削除
+cleanText <- removeSpecialStr(text)
+})
+
